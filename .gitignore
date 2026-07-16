@@ -3,9 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 
-# 실제 비밀번호가 포함된 로컬 config (git에 올리지 않음)
 config.local.yaml
 
-# 런타임 상태 파일
 uploaded_images.json
 raspi_queue.json
