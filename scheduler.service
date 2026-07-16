@@ -1,0 +1,15 @@
+[Unit]
+Description=Barable Data Transfer Scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=barable
+WorkingDirectory=/home/barable/data_transfer
+ExecStart=/usr/bin/python3 /home/barable/data_transfer/scheduler.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

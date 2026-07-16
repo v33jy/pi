@@ -1,0 +1,27 @@
+ftp:
+  host: "CHANGE_ME"            # school server IP or domain
+  port: 2121
+  user: "raspi"
+  password: "CHANGE_ME"        # must match server/config.yaml ftp.password
+
+station:
+  id: "station_01"          # station identifier
+
+sensor:
+  enabled: true
+  interval_seconds: 2400   # 40 minutes
+  data_dirs:
+    - /home/barable/data/Soil
+    - /home/barable/data/T_H
+
+image:
+  enabled: true
+  interval_seconds: 2400   # 40 minutes
+  dirs:
+    - /home/barable/cam0
+    - /home/barable/cam1
+    - /home/barable/cam2
+    - /home/barable/cam3
+
+retry_queue:
+  retry_interval_seconds: 60
