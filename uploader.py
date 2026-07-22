@@ -78,3 +78,56 @@ def upload(filepath, ftp_path, from_queue=False):
         from queue_manager import enqueue
         enqueue(filepath, ftp_path)
     return False
+
+def upload_batch(items, on_success=None, max_reconnects=5):
+    """Uploads many files over ONE shared FTP connection instead of
+    reconnecting per file — for backlog situations (hundreds/thousands of
+    pending files) where per-file connect+login overhead dominates the
+    actual transfer time.
+
+    items: list of (filepath, ftp_path, tag) — tag is opaque, passed back to
+    on_success as-is so callers can update their own tracking without having
+    to re-derive anything from the ftp_path.
+    on_success: called right after each file's STOR completes, so callers
+    can persist progress incrementally (a crash partway through the batch
+    shouldn't lose track of what already made it).
+
+    If the shared connection drops partway through, reconnects once and
+    resumes from the same item (already-completed ones aren't retried)
+    rather than restarting the whole batch.
+    """
+    ensured_dirs = set()
+    idx = 0
+    reconnects = 0
+
+    while idx < len(items) and reconnects <= max_reconnects:
+        try:
+            with ftplib.FTP() as ftp:
+                ftp.connect(FTP_HOST, FTP_PORT, timeout=30)
+                ftp.login(FTP_USER, FTP_PASS)
+                while idx < len(items):
+                    filepath, ftp_path, tag = items[idx]
+                    ftp_dir = "/".join(ftp_path.split("/")[:-1])
+                    if ftp_dir not in ensured_dirs:
+                        ensure_ftp_dirs(ftp, ftp_dir)
+                        ensured_dirs.add(ftp_dir)
+
+                    local_size = os.path.getsize(filepath)
+                    offset = _remote_size(ftp, ftp_path)
+                    if offset >= local_size:
+                        offset = 0
+
+                    with open(filepath, "rb") as f:
+                        if offset:
+                            f.seek(offset)
+                        ftp.storbinary(f"STOR {ftp_path}", f, rest=offset or None)
+                    print(f"[Batch] Complete → {ftp_path}")
+                    if on_success:
+                        on_success(tag)
+                    idx += 1
+        except ftplib.all_errors as e:
+            reconnects += 1
+            print(f"[Batch] Connection dropped at {idx + 1}/{len(items)}, reconnecting ({reconnects}/{max_reconnects}) | {e}")
+            time.sleep(5)
+
+    return idx  # number of items successfully completed
