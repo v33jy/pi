@@ -12,10 +12,29 @@ over the same tracking files):
     sudo systemctl start barable-scheduler
 """
 import os
+import subprocess
 from datetime import datetime
 
 from scheduler import cfg, station_id, IMAGE_LOG, SENSOR_LOG, _load_tracking, _save_tracking
 from uploader import upload_batch
+
+SCHEDULER_SERVICE = "barable-scheduler"
+
+
+def _scheduler_is_running():
+    # backfill.py and scheduler.py both read-modify-write the same tracking
+    # JSON files with no locking — running them at once can silently drop
+    # one process's progress update. systemctl is the source of truth on the
+    # actual Pi; if it's unavailable (e.g. testing off-Pi) fail open rather
+    # than blocking a legitimate run.
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", SCHEDULER_SERVICE],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() == "active"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 def _pending_sensor_items():
@@ -60,6 +79,12 @@ def _pending_image_items():
 
 
 def main():
+    if _scheduler_is_running():
+        print(f"[Backfill] {SCHEDULER_SERVICE} is currently running — stop it first, both")
+        print("processes write the same tracking files and can clobber each other:")
+        print(f"    sudo systemctl stop {SCHEDULER_SERVICE}")
+        raise SystemExit(1)
+
     sensor_uploaded, sensor_items = _pending_sensor_items()
     image_uploaded, image_items = _pending_image_items()
     items = sensor_items + image_items

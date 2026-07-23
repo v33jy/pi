@@ -6,4 +6,5 @@ __pycache__/
 config.local.yaml
 
 uploaded_images.json
+uploaded_sensors.json
 raspi_queue.json

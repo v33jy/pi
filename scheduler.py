@@ -54,6 +54,8 @@ def sensor_job():
     # fully uploaded it's tracked and skipped from then on — previously this
     # only ever looked at *today's* file, so any backlog of past days never
     # got uploaded at all, even after weeks of the scheduler running fine.
+    # (A big one-off backlog is handled by running backfill.py once, not by
+    # this regular job — see that file for why.)
     today = datetime.now().strftime("%Y-%m-%d")
     uploaded = _load_tracking(SENSOR_LOG)
     for data_dir in cfg["sensor"]["data_dirs"]:
