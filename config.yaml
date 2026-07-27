@@ -25,9 +25,3 @@ image:
 
 retry_queue:
   retry_interval_seconds: 60
-
-dashboard:
-  # Admin monitoring heartbeat (optional). Leave blank to skip — upload/retry
-  # logic is unaffected either way.
-  api_url: ""                # e.g. "http://barabledata.khu.ac.kr:8000/api"
-  heartbeat_interval_seconds: 300

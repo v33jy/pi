@@ -4,7 +4,6 @@ import sys
 import json
 from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
-import requests
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 IMAGE_LOG = os.path.join(_DIR, "uploaded_images.json")
@@ -28,7 +27,6 @@ except Exception as e:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from uploader      import upload
 from queue_manager import start_retry_thread
-import queue_manager
 
 def _load_tracking(path):
     # {group_name: {filenames}} instead of one flat list — grouped (by
@@ -100,20 +98,6 @@ def image_job():
                 # progress survives even if this job is slow or interrupted.
                 _save_tracking(IMAGE_LOG, uploaded)
 
-def heartbeat_job():
-    api_url = cfg.get("dashboard", {}).get("api_url")
-    if not api_url:
-        return
-    try:
-        requests.post(
-            f"{api_url}/stations/{station_id}/heartbeat",
-            json={"queue_size": queue_manager.size()},
-            timeout=5,
-        )
-    except Exception as e:
-        # Monitoring is best-effort — never let this affect the upload pipeline.
-        print(f"[Heartbeat] Failed: {e}")
-
 if __name__ == "__main__":
     start_retry_thread(upload, cfg["retry_queue"]["retry_interval_seconds"])
 
@@ -123,10 +107,6 @@ if __name__ == "__main__":
                       next_run_time=now + timedelta(seconds=1))
     scheduler.add_job(image_job,  "interval", seconds=cfg["image"]["interval_seconds"],
                       next_run_time=now + timedelta(seconds=11))
-    if cfg.get("dashboard", {}).get("api_url"):
-        scheduler.add_job(heartbeat_job, "interval",
-                          seconds=cfg["dashboard"].get("heartbeat_interval_seconds", 300),
-                          next_run_time=now + timedelta(seconds=21))
 
     print(f"[Scheduler] {station_id} | FTP {cfg['ftp']['host']}:{cfg['ftp']['port']}")
     print(f"  Sensor : {cfg['sensor']['interval_seconds']}s interval")
