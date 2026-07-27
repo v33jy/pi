@@ -99,6 +99,12 @@ def upload_batch(items, on_success=None, max_reconnects=5):
     ensured_dirs = set()
     idx = 0
     reconnects = 0
+    # Indices already attempted at least once in this run — only these need
+    # the SIZE round trip to resume mid-file after a dropped connection. The
+    # common case (a file's first and only attempt) skips it entirely, which
+    # for a multi-thousand-file backlog removes one full extra round trip per
+    # file — the dominant cost over high-latency LTE, not the transfer itself.
+    attempted = set()
 
     while idx < len(items) and reconnects <= max_reconnects:
         try:
@@ -113,9 +119,12 @@ def upload_batch(items, on_success=None, max_reconnects=5):
                         ensured_dirs.add(ftp_dir)
 
                     local_size = os.path.getsize(filepath)
-                    offset = _remote_size(ftp, ftp_path)
-                    if offset >= local_size:
-                        offset = 0
+                    offset = 0
+                    if idx in attempted:
+                        offset = _remote_size(ftp, ftp_path)
+                        if offset >= local_size:
+                            offset = 0
+                    attempted.add(idx)
 
                     with open(filepath, "rb") as f:
                         if offset:
