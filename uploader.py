@@ -79,7 +79,7 @@ def upload(filepath, ftp_path, from_queue=False):
         enqueue(filepath, ftp_path)
     return False
 
-def upload_batch(items, on_success=None, max_reconnects=5):
+def upload_batch(items, on_success=None, max_reconnects=200):
     """Uploads many files over ONE shared FTP connection instead of
     reconnecting per file — for backlog situations (hundreds/thousands of
     pending files) where per-file connect+login overhead dominates the
@@ -92,9 +92,17 @@ def upload_batch(items, on_success=None, max_reconnects=5):
     can persist progress incrementally (a crash partway through the batch
     shouldn't lose track of what already made it).
 
-    If the shared connection drops partway through, reconnects once and
-    resumes from the same item (already-completed ones aren't retried)
-    rather than restarting the whole batch.
+    If the shared connection drops partway through, reconnects (with
+    backoff, up to max_reconnects times) and resumes from the same item
+    (already-completed ones aren't retried) rather than restarting the whole
+    batch. max_reconnects defaults high — this is meant to be run once,
+    unattended, over a flaky LTE link, so it should keep trying through
+    ordinary connection drops rather than giving up early and leaving a
+    caller that chains "backfill.py && start the scheduler" stuck never
+    starting it. A rejected login (wrong FTP credentials) is different —
+    that's not going to fix itself on retry, so it gives up immediately
+    instead of burning the whole reconnect budget on something no amount of
+    retrying can fix.
     """
     ensured_dirs = set()
     idx = 0
@@ -110,7 +118,11 @@ def upload_batch(items, on_success=None, max_reconnects=5):
         try:
             with ftplib.FTP() as ftp:
                 ftp.connect(FTP_HOST, FTP_PORT, timeout=30)
-                ftp.login(FTP_USER, FTP_PASS)
+                try:
+                    ftp.login(FTP_USER, FTP_PASS)
+                except ftplib.error_perm as e:
+                    print(f"[Batch] Login rejected ({e}) — wrong FTP username/password, not a dropped connection. Giving up rather than retrying something retrying can't fix.")
+                    return idx
                 while idx < len(items):
                     filepath, ftp_path, tag = items[idx]
                     ftp_dir = "/".join(ftp_path.split("/")[:-1])
@@ -136,7 +148,8 @@ def upload_batch(items, on_success=None, max_reconnects=5):
                     idx += 1
         except ftplib.all_errors as e:
             reconnects += 1
-            print(f"[Batch] Connection dropped at {idx + 1}/{len(items)}, reconnecting ({reconnects}/{max_reconnects}) | {e}")
-            time.sleep(5)
+            wait = min(60, 5 * reconnects)  # ramps up to a 60s cap instead of hammering a struggling link every 5s
+            print(f"[Batch] Connection dropped at {idx + 1}/{len(items)}, reconnecting ({reconnects}/{max_reconnects}) in {wait}s | {e}")
+            time.sleep(wait)
 
     return idx  # number of items successfully completed
