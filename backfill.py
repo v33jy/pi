@@ -104,6 +104,12 @@ def main():
 
     done = upload_batch(items, on_success=_on_success)
     print(f"Done: {done}/{len(items)} uploaded")
+    if done < len(items):
+        # Ran out of reconnect attempts with items still left — a caller
+        # chaining `backfill.py && systemctl start ...` needs this to be a
+        # real failure exit, not a silent success, or the scheduler would
+        # come back up while backlog still remains unfinished.
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
