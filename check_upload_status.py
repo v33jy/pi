@@ -1,19 +1,18 @@
 """Read-only report of what this Pi has uploaded vs. what's still pending —
-no uploads happen here, it just reuses backfill.py's own pending-file scan
-(same logic the actual upload path uses, so the report can't drift out of
-sync with reality) plus the retry queue.
+no uploads happen here, it just reuses scheduler.py's own pending-file scan
+(the exact same logic the actual upload path uses, so the report can't
+drift out of sync with reality).
 
 Run from raspberry_pi/:
     python3 check_upload_status.py
 """
-from backfill import _pending_sensor_items, _pending_image_items
-import queue_manager
+from scheduler import _pending_sensor_items, _pending_image_items
 
 
 def _report(label, uploaded, pending_items):
     pending_by_group = {}
     for filepath, ftp_path, tag in pending_items:
-        group = tag[1]  # dir_name or cam_name — see backfill.py's tag shape
+        group = tag[1]  # dir_name or cam_name — see scheduler.py's tag shape
         pending_by_group.setdefault(group, []).append(tag[2])  # filename
 
     groups = sorted(set(uploaded) | set(pending_by_group))
@@ -40,19 +39,12 @@ def main():
     print()
     _report("Images", image_uploaded, image_pending)
 
-    print()
-    q_size = queue_manager.size()
-    print(f"--- Retry queue ---\n  {q_size} item(s) waiting to retry (failed uploads)")
-    if q_size:
-        for item in queue_manager._load()[:10]:
-            print(f"      {item['ftp_path']}")
-
     total_pending = len(sensor_pending) + len(image_pending)
     print()
-    if total_pending == 0 and q_size == 0:
-        print("OK — nothing pending, nothing stuck in the retry queue.")
+    if total_pending == 0:
+        print("OK — nothing pending.")
     else:
-        print(f"{total_pending} file(s) not yet uploaded, {q_size} stuck in retry queue.")
+        print(f"{total_pending} file(s) not yet uploaded.")
         print("(Note: today's still-growing sensor CSVs always show as 'pending' here —")
         print(" that's expected, the scheduler re-sends just the new rows each cycle.)")
 
