@@ -148,7 +148,7 @@ def upload_batch(items, on_success=None, max_reconnects=200):
                     idx += 1
         except ftplib.all_errors as e:
             reconnects += 1
-            wait = min(60, 5 * reconnects)  # ramps up to a 60s cap instead of hammering a struggling link every 5s
+            wait = min(60, 15 * reconnects)  # ramps 15s->60s cap — a dead server shouldn't get hammered every few seconds
             print(f"[Batch] Connection dropped at {idx + 1}/{len(items)}, reconnecting ({reconnects}/{max_reconnects}) in {wait}s | {e}")
             time.sleep(wait)
 
