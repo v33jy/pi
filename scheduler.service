@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=barable
-WorkingDirectory=/home/barable/data_transfer
-ExecStart=/usr/bin/python3 /home/barable/data_transfer/scheduler.py
+User=__USER__
+WorkingDirectory=__HOME__/data_transfer
+ExecStart=/usr/bin/python3 -u __HOME__/data_transfer/scheduler.py
 Restart=on-failure
 RestartSec=30
 

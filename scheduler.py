@@ -28,7 +28,13 @@ except Exception as e:
     raise SystemExit(1)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from uploader import upload_batch
+# Default stays FTP unless a station's config explicitly opts into HTTP —
+# existing stations have no "transport" key at all, so this changes nothing
+# for them.
+if cfg.get("transport") == "http":
+    from http_uploader import upload_batch
+else:
+    from uploader import upload_batch
 
 def _load_tracking(path):
     # {group_name: {filenames}} instead of one flat list — grouped (by
@@ -157,7 +163,10 @@ if __name__ == "__main__":
     scheduler.add_job(upload_job, "interval", seconds=cfg["sensor"]["interval_seconds"],
                       next_run_time=now + timedelta(seconds=1))
 
-    print(f"[Scheduler] {station_id} | FTP {cfg['ftp']['host']}:{cfg['ftp']['port']}")
+    if cfg.get("transport") == "http":
+        print(f"[Scheduler] {station_id} | HTTP {cfg['http']['base_url']}")
+    else:
+        print(f"[Scheduler] {station_id} | FTP {cfg['ftp']['host']}:{cfg['ftp']['port']}")
     print(f"  Upload check interval: {cfg['sensor']['interval_seconds']}s")
 
     scheduler.start()
