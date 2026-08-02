@@ -11,7 +11,7 @@ from scheduler import _pending_sensor_items, _pending_image_items
 
 def _report(label, uploaded, pending_items):
     pending_by_group = {}
-    for filepath, ftp_path, tag in pending_items:
+    for filepath, remote_path, tag in pending_items:
         group = tag[1]  # dir_name or cam_name — see scheduler.py's tag shape
         pending_by_group.setdefault(group, []).append(tag[2])  # filename
 

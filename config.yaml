@@ -1,15 +1,6 @@
-ftp:
-  host: "CHANGE_ME"            # school server IP or domain
-  port: 2121
-  user: "raspi"
-  password: "CHANGE_ME"        # must match server/config.yaml ftp.password
-
-# Alternative to FTP above. To use it, set transport: http and fill in the
-# section below — the ftp section can stay as-is, it's simply ignored.
-# transport: http
-# http:
-#   base_url: "https://barabledata.khu.ac.kr/api/ingest"
-#   shared_key: "CHANGE_ME"     # must match dashboard/backend config.yaml ingest.shared_key
+http:
+  base_url: "https://barabledata.khu.ac.kr/api/ingest"
+  shared_key: "CHANGE_ME"      # must match dashboard/backend config.yaml ingest.shared_key
 
 station:
   id: "station_01"          # station identifier

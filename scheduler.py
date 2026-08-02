@@ -28,13 +28,7 @@ except Exception as e:
     raise SystemExit(1)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# Default stays FTP unless a station's config explicitly opts into HTTP —
-# existing stations have no "transport" key at all, so this changes nothing
-# for them.
-if cfg.get("transport") == "http":
-    from http_uploader import upload_batch
-else:
-    from uploader import upload_batch
+from http_uploader import upload_batch
 
 def _load_tracking(path):
     # {group_name: {filenames}} instead of one flat list — grouped (by
@@ -73,8 +67,8 @@ def _pending_sensor_items():
             if not is_today and filename in dir_uploaded:
                 continue
             filepath = os.path.join(data_dir, filename)
-            ftp_path = f"{station_id}/sensor/{dir_name}/{filename}"
-            items.append((filepath, ftp_path, ("sensor", dir_name, filename, is_today)))
+            remote_path = f"{station_id}/sensor/{dir_name}/{filename}"
+            items.append((filepath, remote_path, ("sensor", dir_name, filename, is_today)))
     return uploaded, items
 
 def _pending_image_items():
@@ -95,8 +89,8 @@ def _pending_image_items():
             # Filenames are "YYYY-MM-DD_HH-MM-camN.jpg" — nesting by that
             # month keeps any one folder from accumulating years of files.
             month = filename[:7]
-            ftp_path = f"{station_id}/{cam_name}/{month}/{filename}"
-            cam_items.append((filepath, ftp_path, ("image", cam_name, filename)))
+            remote_path = f"{station_id}/{cam_name}/{month}/{filename}"
+            cam_items.append((filepath, remote_path, ("image", cam_name, filename)))
         per_camera.append(cam_items)
 
     # Round-robin across cameras (one from cam0, one from cam1, ... repeat)
@@ -113,9 +107,9 @@ def _pending_image_items():
 
 def upload_job(always_check=False):
     """The one and only upload pass — uploads everything not yet confirmed
-    on the server (sensor CSVs and images together) over a single shared
-    FTP connection. The regular scheduled cycle calls this every interval,
-    and backfill.py calls it once on demand for an immediate catch-up —
+    on the server (sensor CSVs and images together). The regular scheduled
+    cycle calls this every interval, and backfill.py calls it once on
+    demand for an immediate catch-up —
     there is no separate "bulk" code path anymore, so there's nothing that
     can disagree with this function about what's already uploaded.
 
@@ -163,10 +157,7 @@ if __name__ == "__main__":
     scheduler.add_job(upload_job, "interval", seconds=cfg["sensor"]["interval_seconds"],
                       next_run_time=now + timedelta(seconds=1))
 
-    if cfg.get("transport") == "http":
-        print(f"[Scheduler] {station_id} | HTTP {cfg['http']['base_url']}")
-    else:
-        print(f"[Scheduler] {station_id} | FTP {cfg['ftp']['host']}:{cfg['ftp']['port']}")
+    print(f"[Scheduler] {station_id} | HTTP {cfg['http']['base_url']}")
     print(f"  Upload check interval: {cfg['sensor']['interval_seconds']}s")
 
     scheduler.start()

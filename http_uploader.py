@@ -21,9 +21,8 @@ cfg = _load_config()
 BASE_URL = cfg["http"]["base_url"].rstrip("/")
 API_KEY = cfg["http"]["shared_key"]
 
-# Same threshold/backoff shape as uploader.py's FTP path, for the same
-# reason: one bad file shouldn't be allowed to eat the whole run's retry
-# budget and block everything queued behind it.
+# A single file failing this many times in a row shouldn't be allowed to eat
+# the whole run's retry budget and block everything queued behind it.
 ITEM_FAILURE_THRESHOLD = 3
 
 
@@ -40,25 +39,23 @@ def _remote_size(remote_path):
 
 
 def upload_batch(items, on_success=None, max_reconnects=20, always_check=False):
-    """HTTP equivalent of uploader.py's upload_batch — same signature and
-    same return value, so scheduler.py can pick either transport without
-    changing anything else about how items are built or tracked.
+    """Uploads items one at a time over HTTP; scheduler.py builds `items` and
+    tracks progress via on_success without needing to know anything about
+    the transport itself.
 
-    There's no persistent connection to drop/reconnect the way FTP has, so
-    max_reconnects here just counts consecutive failed requests (server
-    unreachable, 5xx, timeout, ...) and backs off between retries the same
-    way. A single item that keeps failing on its own is skipped after
-    ITEM_FAILURE_THRESHOLD attempts, same as the FTP path — it'll simply
-    show up as pending again next cycle.
+    There's no persistent connection to drop/reconnect, so max_reconnects
+    here just counts consecutive failed requests (server unreachable, 5xx,
+    timeout, ...) and backs off between retries. A single item that keeps
+    failing on its own is skipped after ITEM_FAILURE_THRESHOLD attempts —
+    it'll simply show up as pending again next cycle.
 
-    Unlike FTP, a failed/retried upload always resends the whole file (no
-    byte-range resume) — sensor CSVs and single images are small enough that
-    this isn't worth the extra complexity.
+    A failed/retried upload always resends the whole file (no byte-range
+    resume) — sensor CSVs and single images are small enough that this isn't
+    worth the extra complexity.
 
     always_check: skip re-uploading a file the server already has in full
-    (checked via HEAD), same purpose as the FTP version — real LTE data, not
-    just wasted time, when re-running after resetting a tracking file you no
-    longer trust.
+    (checked via HEAD) — real LTE data, not just wasted time, when
+    re-running after resetting a tracking file you no longer trust.
     """
     idx = 0
     reconnects = 0
