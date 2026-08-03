@@ -39,13 +39,26 @@ def _load_tracking(path):
             with open(path) as f:
                 raw = json.load(f)
             return {group: set(names) for group, names in raw.items()}
-        except Exception:
+        except Exception as e:
+            # Starting from empty here just means already-uploaded files get
+            # re-checked (upload_batch's resume-from-server-size logic skips
+            # anything already complete) rather than actually re-sent — but
+            # that was previously indistinguishable from "nothing's ever been
+            # uploaded", with no trace of why. Printed (not raised) since the
+            # scheduler should still run this cycle rather than crash.
+            print(f"[Tracking] {path} unreadable, treating as empty this run | {e}")
             return {}
     return {}
 
 def _save_tracking(path, tracking):
-    with open(path, "w") as f:
+    # Write-then-rename instead of writing the real path directly — a crash
+    # or power loss mid-write used to leave a truncated/corrupt JSON file
+    # behind, which _load_tracking above can only detect after the fact.
+    # os.replace is atomic on both POSIX and Windows.
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w") as f:
         json.dump({group: sorted(names) for group, names in tracking.items()}, f, indent=2)
+    os.replace(tmp_path, path)
 
 def _pending_sensor_items():
     # Today's file keeps growing, so it's always re-attempted (upload_batch's
