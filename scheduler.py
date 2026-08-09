@@ -31,40 +31,30 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from http_uploader import upload_batch
 
 def _load_tracking(path):
-    # {group_name: {filenames}} instead of one flat list — grouped (by
-    # camera, or by sensor folder) so the file is actually readable rather
-    # than one giant blob.
     if os.path.exists(path):
         try:
             with open(path) as f:
                 raw = json.load(f)
             return {group: set(names) for group, names in raw.items()}
         except Exception as e:
-            # Starting from empty here just means already-uploaded files get
-            # re-checked (upload_batch's resume-from-server-size logic skips
-            # anything already complete) rather than actually re-sent — but
-            # that was previously indistinguishable from "nothing's ever been
-            # uploaded", with no trace of why. Printed (not raised) since the
-            # scheduler should still run this cycle rather than crash.
+            # Safe to treat as empty: upload_batch's resume-from-server-size
+            # check will skip files already complete rather than re-send them.
             print(f"[Tracking] {path} unreadable, treating as empty this run | {e}")
             return {}
     return {}
 
 def _save_tracking(path, tracking):
-    # Write-then-rename instead of writing the real path directly — a crash
-    # or power loss mid-write used to leave a truncated/corrupt JSON file
-    # behind, which _load_tracking above can only detect after the fact.
-    # os.replace is atomic on both POSIX and Windows.
+    # Write-then-rename: os.replace is atomic, so a crash mid-write can't
+    # leave a corrupt JSON file behind.
     tmp_path = f"{path}.tmp"
     with open(tmp_path, "w") as f:
         json.dump({group: sorted(names) for group, names in tracking.items()}, f, indent=2)
     os.replace(tmp_path, path)
 
 def _pending_sensor_items():
-    # Today's file keeps growing, so it's always re-attempted (upload_batch's
-    # resume-from-server-size logic only sends the newly appended rows).
-    # Past days' files are closed and never change again, so once one is
-    # confirmed fully uploaded it's tracked and skipped from then on.
+    # Today's file keeps growing, so it's always re-attempted (upload_batch
+    # resends only the newly appended rows). Past days are closed and never
+    # change, so once tracked as uploaded they're skipped.
     today = datetime.now().strftime("%Y-%m-%d")
     uploaded = _load_tracking(SENSOR_LOG)
     items = []
@@ -84,6 +74,16 @@ def _pending_sensor_items():
             items.append((filepath, remote_path, ("sensor", dir_name, filename, is_today)))
     return uploaded, items
 
+def _image_month(root, img_dir, filename):
+    # Files can live flat in img_dir ("YYYY-MM-DD_HH-MM-camN.jpg", month from
+    # the filename prefix) or nested one level under a YYYYMMDD date folder
+    # (month from the folder name instead, since the filename itself may not
+    # follow the dashed format).
+    subdir = os.path.basename(root) if root != img_dir else None
+    if subdir and len(subdir) == 8 and subdir.isdigit():
+        return f"{subdir[:4]}-{subdir[4:6]}"
+    return filename[:7]
+
 def _pending_image_items():
     uploaded = _load_tracking(IMAGE_LOG)
     per_camera = []
@@ -93,25 +93,24 @@ def _pending_image_items():
             continue
         cam_uploaded = uploaded.setdefault(cam_name, set())
         cam_items = []
-        for filename in os.listdir(img_dir):
-            if not filename.endswith((".jpg", ".png")):
-                continue
-            if filename in cam_uploaded:
-                continue
-            filepath = os.path.join(img_dir, filename)
-            # Filenames are "YYYY-MM-DD_HH-MM-camN.jpg" — nesting by that
-            # month keeps any one folder from accumulating years of files.
-            month = filename[:7]
-            remote_path = f"{station_id}/{cam_name}/{month}/{filename}"
-            cam_items.append((filepath, remote_path, ("image", cam_name, filename)))
+        for root, _dirs, filenames in os.walk(img_dir):
+            for filename in filenames:
+                if not filename.endswith((".jpg", ".png")):
+                    continue
+                filepath = os.path.join(root, filename)
+                # Relative-path key so files with the same basename under
+                # different date folders can't collide with each other or
+                # with an unrelated flat file.
+                rel_key = os.path.relpath(filepath, img_dir).replace(os.sep, "/")
+                if rel_key in cam_uploaded:
+                    continue
+                month = _image_month(root, img_dir, filename)
+                remote_path = f"{station_id}/{cam_name}/{month}/{filename}"
+                cam_items.append((filepath, remote_path, ("image", cam_name, rel_key)))
         per_camera.append(cam_items)
 
     # Round-robin across cameras (one from cam0, one from cam1, ... repeat)
-    # instead of draining one camera's entire backlog before starting the
-    # next. A huge pile on one camera used to mean every other camera got
-    # no turn at all within a run — this is the actual reason a camera could
-    # go months without uploading anything even though pending counts looked
-    # fine in isolation.
+    # so a large backlog on one camera can't starve the others of a turn.
     items = [
         item for group in itertools.zip_longest(*per_camera)
         for item in group if item is not None
@@ -119,22 +118,9 @@ def _pending_image_items():
     return uploaded, items
 
 def upload_job(always_check=False):
-    """The one and only upload pass — uploads everything not yet confirmed
-    on the server (sensor CSVs and images together). The regular scheduled
-    cycle calls this every interval, and backfill.py calls it once on
-    demand for an immediate catch-up —
-    there is no separate "bulk" code path anymore, so there's nothing that
-    can disagree with this function about what's already uploaded.
-
-    Guarded by a file lock so that a manual `python3 backfill.py` run and
-    the scheduled cycle can never execute this at the same moment and
-    interleave writes to the tracking files — one simply waits for the
-    other instead of the two silently corrupting each other's progress
-    (the actual cause of a past incident where files looked "uploaded" in
-    the tracking file but were never actually on the server). This is also
-    why the scheduler service no longer needs to be stopped before running
-    backfill.py, or restarted after — there's nothing to coordinate by hand.
-    """
+    """Single upload pass (sensor CSVs + images) used by both the scheduled
+    cycle and backfill.py. Guarded by a file lock so the two can never run
+    at the same moment and interleave writes to the tracking files."""
     with open(_LOCK_PATH, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
 
@@ -152,8 +138,8 @@ def upload_job(always_check=False):
                     sensor_uploaded[dir_name].add(filename)
                     _save_tracking(SENSOR_LOG, sensor_uploaded)
             else:
-                _, cam_name, filename = tag
-                image_uploaded[cam_name].add(filename)
+                _, cam_name, rel_key = tag
+                image_uploaded[cam_name].add(rel_key)
                 _save_tracking(IMAGE_LOG, image_uploaded)
 
         processed, permanently_failed = upload_batch(items, on_success=_on_success, always_check=always_check)
