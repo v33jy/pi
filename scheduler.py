@@ -51,6 +51,16 @@ def _save_tracking(path, tracking):
         json.dump({group: sorted(names) for group, names in tracking.items()}, f, indent=2)
     os.replace(tmp_path, path)
 
+def _is_todays_sensor_file(root, data_dir, filename, today):
+    # Flat files follow "YYYY-MM-DD.csv" (date is the filename itself). Files
+    # nested one level under a YYYYMMDD date folder may not have a parseable
+    # date in the filename (e.g. "th_20260810.csv"), so the folder name is
+    # the source of truth there instead — same approach as _image_month.
+    subdir = os.path.basename(root) if root != data_dir else None
+    if subdir and len(subdir) == 8 and subdir.isdigit():
+        return f"{subdir[:4]}-{subdir[4:6]}-{subdir[6:8]}" == today
+    return filename.startswith(today)
+
 def _pending_sensor_items():
     # Today's file keeps growing, so it's always re-attempted (upload_batch
     # resends only the newly appended rows). Past days are closed and never
@@ -63,15 +73,20 @@ def _pending_sensor_items():
             continue
         dir_name = os.path.basename(data_dir)
         dir_uploaded = uploaded.setdefault(dir_name, set())
-        for filename in os.listdir(data_dir):
-            if not filename.endswith(".csv"):
-                continue
-            is_today = filename.startswith(today)
-            if not is_today and filename in dir_uploaded:
-                continue
-            filepath = os.path.join(data_dir, filename)
-            remote_path = f"{station_id}/sensor/{dir_name}/{filename}"
-            items.append((filepath, remote_path, ("sensor", dir_name, filename, is_today)))
+        for root, _dirs, filenames in os.walk(data_dir):
+            for filename in filenames:
+                if not filename.endswith(".csv"):
+                    continue
+                filepath = os.path.join(root, filename)
+                # Relative-path key so files with the same basename under
+                # different date folders can't collide with each other or
+                # with an unrelated flat file.
+                rel_key = os.path.relpath(filepath, data_dir).replace(os.sep, "/")
+                is_today = _is_todays_sensor_file(root, data_dir, filename, today)
+                if not is_today and rel_key in dir_uploaded:
+                    continue
+                remote_path = f"{station_id}/sensor/{dir_name}/{filename}"
+                items.append((filepath, remote_path, ("sensor", dir_name, rel_key, is_today)))
     return uploaded, items
 
 def _image_month(root, img_dir, filename):
@@ -133,9 +148,9 @@ def upload_job(always_check=False):
         def _on_success(tag):
             kind = tag[0]
             if kind == "sensor":
-                _, dir_name, filename, is_today = tag
+                _, dir_name, rel_key, is_today = tag
                 if not is_today:
-                    sensor_uploaded[dir_name].add(filename)
+                    sensor_uploaded[dir_name].add(rel_key)
                     _save_tracking(SENSOR_LOG, sensor_uploaded)
             else:
                 _, cam_name, rel_key = tag
