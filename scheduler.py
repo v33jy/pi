@@ -51,13 +51,22 @@ def _save_tracking(path, tracking):
         json.dump({group: sorted(names) for group, names in tracking.items()}, f, indent=2)
     os.replace(tmp_path, path)
 
+def _date_folder(root, base_dir):
+    """If `root` (from os.walk) is a YYYYMMDD-named subfolder directly under
+    `base_dir`, returns that folder name — else None (flat file, or nested
+    deeper than one level)."""
+    if root == base_dir:
+        return None
+    subdir = os.path.basename(root)
+    return subdir if len(subdir) == 8 and subdir.isdigit() else None
+
 def _is_todays_sensor_file(root, data_dir, filename, today):
     # Flat files follow "YYYY-MM-DD.csv" (date is the filename itself). Files
-    # nested one level under a YYYYMMDD date folder may not have a parseable
-    # date in the filename (e.g. "th_20260810.csv"), so the folder name is
-    # the source of truth there instead — same approach as _image_month.
-    subdir = os.path.basename(root) if root != data_dir else None
-    if subdir and len(subdir) == 8 and subdir.isdigit():
+    # nested one level under a date folder may not have a parseable date in
+    # the filename (e.g. "th_20260810.csv"), so the folder name is the
+    # source of truth there instead.
+    subdir = _date_folder(root, data_dir)
+    if subdir:
         return f"{subdir[:4]}-{subdir[4:6]}-{subdir[6:8]}" == today
     return filename.startswith(today)
 
@@ -91,11 +100,11 @@ def _pending_sensor_items():
 
 def _image_month(root, img_dir, filename):
     # Files can live flat in img_dir ("YYYY-MM-DD_HH-MM-camN.jpg", month from
-    # the filename prefix) or nested one level under a YYYYMMDD date folder
-    # (month from the folder name instead, since the filename itself may not
-    # follow the dashed format).
-    subdir = os.path.basename(root) if root != img_dir else None
-    if subdir and len(subdir) == 8 and subdir.isdigit():
+    # the filename prefix) or nested one level under a date folder (month
+    # from the folder name instead, since the filename itself may not follow
+    # the dashed format).
+    subdir = _date_folder(root, img_dir)
+    if subdir:
         return f"{subdir[:4]}-{subdir[4:6]}"
     return filename[:7]
 
